@@ -1,0 +1,71 @@
+name: Build UnliTube APK
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build debug APK
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: unlitube-debug
+          path: app/build/outputs/apk/debug/*.apk
+
+      # Release signing turns on only when the four keystore secrets exist.
+      # See SIGNING.md. Without them this step is skipped and debug still ships.
+      - name: Check signing secrets
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.UNLITUBE_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then echo "ready=true" >> "$GITHUB_OUTPUT"; else echo "ready=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Decode keystore
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.UNLITUBE_KEYSTORE_B64 }}
+        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/unlitube.jks"
+
+      - name: Build signed release APK
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          UNLITUBE_KEYSTORE_PATH: ${{ runner.temp }}/unlitube.jks
+          UNLITUBE_KEYSTORE_PASSWORD: ${{ secrets.UNLITUBE_KEYSTORE_PASSWORD }}
+          UNLITUBE_KEY_ALIAS: ${{ secrets.UNLITUBE_KEY_ALIAS }}
+          UNLITUBE_KEY_PASSWORD: ${{ secrets.UNLITUBE_KEY_PASSWORD }}
+        run: gradle assembleRelease --stacktrace
+
+      - name: Upload release APK
+        if: steps.signing.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unlitube-release
+          path: app/build/outputs/apk/release/*.apk
