@@ -24,6 +24,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action default includes the legacy "tools" package, which no
+          # longer exists in current cmdline-tools and fails sdkmanager.
+          # Install exactly what AGP needs for compileSdk 34 instead.
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Set up Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
