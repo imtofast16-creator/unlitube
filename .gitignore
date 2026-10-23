@@ -1,0 +1,12 @@
+*.jks
+*.keystore
+keystore.properties
+local.properties
+.gradle/
+build/
+app/build/
+.idea/
+*.iml
+.DS_Store
+web/node_modules/
+web/.next/
