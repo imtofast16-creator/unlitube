@@ -62,42 +62,42 @@ object SettingsStore {
         sponsorBlockEnabled = prefs.getBoolean("sponsorBlockEnabled", true)
     }
 
-    fun setThemeMode(value: String) {
+    fun updateThemeMode(value: String) {
         themeMode = value
         save { putString("themeMode", value) }
     }
 
-    fun setLiteMode(value: Boolean) {
+    fun updateLiteMode(value: Boolean) {
         liteMode = value
         save { putBoolean("liteMode", value) }
     }
 
-    fun setQualityCap(value: Int) {
+    fun updateQualityCap(value: Int) {
         qualityCap = value
         save { putInt("qualityCap", value) }
     }
 
-    fun setHideShorts(value: Boolean) {
+    fun updateHideShorts(value: Boolean) {
         hideShorts = value
         save { putBoolean("hideShorts", value) }
     }
 
-    fun setHideComments(value: Boolean) {
+    fun updateHideComments(value: Boolean) {
         hideComments = value
         save { putBoolean("hideComments", value) }
     }
 
-    fun setHideRelated(value: Boolean) {
+    fun updateHideRelated(value: Boolean) {
         hideRelated = value
         save { putBoolean("hideRelated", value) }
     }
 
-    fun setSearchOnlyMode(value: Boolean) {
+    fun updateSearchOnlyMode(value: Boolean) {
         searchOnlyMode = value
         save { putBoolean("searchOnlyMode", value) }
     }
 
-    fun setSponsorBlockEnabled(value: Boolean) {
+    fun updateSponsorBlockEnabled(value: Boolean) {
         sponsorBlockEnabled = value
         save { putBoolean("sponsorBlockEnabled", value) }
     }
