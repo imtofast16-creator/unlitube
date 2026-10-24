@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MergingMediaSource
@@ -30,9 +31,14 @@ class UnliPlayer(context: Context) {
 
     val exoPlayer: ExoPlayer = ExoPlayer.Builder(appContext).build()
 
-    private val dataSourceFactory = DefaultHttpDataSource.Factory()
-        .setUserAgent("com.google.android.youtube/20.10.38 (Linux; U; Android 15)")
-        .setAllowCrossProtocolRedirects(true)
+    // DefaultDataSource wraps the HTTP factory so the same player handles
+    // streamed URLs and downloaded file:// URIs for offline playback.
+    private val dataSourceFactory = DefaultDataSource.Factory(
+        appContext,
+        DefaultHttpDataSource.Factory()
+            .setUserAgent("com.google.android.youtube/20.10.38 (Linux; U; Android 15)")
+            .setAllowCrossProtocolRedirects(true)
+    )
 
     fun play(url: String) {
         exoPlayer.setMediaItem(MediaItem.fromUri(url))
