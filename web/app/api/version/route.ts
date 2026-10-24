@@ -8,9 +8,9 @@ export async function GET() {
     app: "UnliTube",
     versionName: "1.0.0",
     versionCode: 11,
-    apkUrl: "",
-    sha256: "",
-    notes: "1.0.0 first complete build: live feed, search, watch with custom player, channel pages, comments, mini player, background play, PiP, local library, downloads with offline playback, SponsorBlock, update checker, Distraction Shield, Focus notes and ClipForge, plus the premium UI redesign. Debug APK only for now, the signed public release still needs the signing keystore.",
+    apkUrl: "https://github.com/imtofast16-creator/unlitube/releases/download/v1.0.0/UnliTube-1.0.0-debug.apk",
+    sha256: "d611362e9eacd05d6ee44b619516b27753cb14675e5d7ffcdd0e9a2e60d464e9",
+    notes: "1.0.0 first complete build: live feed, search, watch with custom player, channel pages, comments, mini player, background play, PiP, local library, downloads with offline playback, SponsorBlock, update checker, Distraction Shield, Focus notes and ClipForge, plus the premium UI redesign. Debug APK, the signed public release still needs the signing keystore.",
     mandatory: false,
   });
 }
