@@ -702,7 +702,6 @@ private fun Header(onSearchTap: () -> Unit) {
 }
 
 @Composable
-@Composable
 private fun HeroCard(
     video: VideoItem,
     onClick: () -> Unit,
