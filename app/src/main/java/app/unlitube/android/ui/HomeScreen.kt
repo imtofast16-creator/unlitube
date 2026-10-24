@@ -79,6 +79,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
 import app.unlitube.android.data.ChannelPage
 import app.unlitube.android.data.CommentItem
+import app.unlitube.android.data.DownloadStore
 import app.unlitube.android.data.HistoryEntity
 import app.unlitube.android.data.LibraryStore
 import app.unlitube.android.data.PlaylistEntity
@@ -330,7 +331,7 @@ private fun HomeFeed(
         }
         item {
             Text(
-                text = "UnliTube 0.6.0 - local library, Phase 1 slice 5",
+                text = "UnliTube 0.7.0 - downloads and offline playback, slice 6",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -729,6 +730,7 @@ private fun WatchContent(
     var descriptionExpanded by remember(video.id) { mutableStateOf(false) }
     var liked by remember(video.id) { mutableStateOf(false) }
     var watchLater by remember(video.id) { mutableStateOf(false) }
+    var downloadStatus by remember(video.id) { mutableStateOf<String?>(null) }
     var showSaveDialog by remember(video.id) { mutableStateOf(false) }
     var savePlaylists by remember(video.id) { mutableStateOf<List<PlaylistEntity>>(emptyList()) }
     var newPlaylistName by remember(video.id) { mutableStateOf("") }
@@ -736,6 +738,7 @@ private fun WatchContent(
     LaunchedEffect(video.id) {
         liked = runCatching { LibraryStore.isLiked(video.id) }.getOrDefault(false)
         watchLater = runCatching { LibraryStore.isWatchLater(video.id) }.getOrDefault(false)
+        downloadStatus = runCatching { LibraryStore.download(video.id)?.status }.getOrNull()
     }
 
     val scope = rememberCoroutineScope()
@@ -786,7 +789,19 @@ private fun WatchContent(
         listState.scrollToItem(0)
         val alreadyLoaded = PlayerHolder.nowPlaying?.id == video.id && PlayerHolder.hasMedia()
         PlayerHolder.nowPlaying = video
-        if (details.streams.isEmpty()) {
+        val savedDownload = runCatching { LibraryStore.download(video.id) }.getOrNull()
+        val localOption = if (savedDownload?.status == "completed") {
+            DownloadStore.localOption(savedDownload)
+        } else {
+            null
+        }
+        if (localOption != null) {
+            PlayerHolder.embedOnly = false
+            if (!alreadyLoaded) {
+                player.play(localOption)
+            }
+            PlayerHolder.startService(context)
+        } else if (details.streams.isEmpty()) {
             fallbackMode = true
             PlayerHolder.embedOnly = true
         } else {
@@ -1016,6 +1031,30 @@ private fun WatchContent(
                             showSaveDialog = true
                         }
                     }) { Text("Save") }
+                    TextButton(onClick = {
+                        scope.launch {
+                            when (downloadStatus) {
+                                "completed" -> {
+                                    DownloadStore.deleteDownload(context, video.id)
+                                    downloadStatus = null
+                                }
+                                "downloading" -> Unit
+                                else -> {
+                                    downloadStatus = "downloading"
+                                    DownloadStore.startDownload(context, details)
+                                }
+                            }
+                        }
+                    }) {
+                        Text(
+                            when (downloadStatus) {
+                                "completed" -> "Downloaded"
+                                "downloading" -> "Downloading..."
+                                "failed" -> "Download failed, retry"
+                                else -> "Download"
+                            }
+                        )
+                    }
                 }
                 if (fallbackMode) {
                     Text(
@@ -1736,7 +1775,7 @@ private fun YouScreen() {
         }
         item {
             Text(
-                text = "UnliTube 0.6.0 - Phase 1 slice 5",
+                text = "UnliTube 0.7.0 - slice 6",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
