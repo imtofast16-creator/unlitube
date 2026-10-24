@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.ContextCompat
+import app.unlitube.android.data.LibraryStore
 import app.unlitube.android.data.SettingsStore
 import app.unlitube.android.player.PlayerHolder
 import app.unlitube.android.ui.HomeScreen
@@ -24,6 +25,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         SettingsStore.init(this)
+        LibraryStore.init(this)
         requestNotificationPermissionIfNeeded()
         val initialVideoId = extractVideoId(intent)
         setContent {
