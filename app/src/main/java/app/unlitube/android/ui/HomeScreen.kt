@@ -79,6 +79,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
 import app.unlitube.android.data.ChannelPage
 import app.unlitube.android.data.CommentItem
+import app.unlitube.android.data.HistoryEntity
+import app.unlitube.android.data.LibraryStore
+import app.unlitube.android.data.PlaylistEntity
 import app.unlitube.android.data.SettingsStore
 import app.unlitube.android.data.VideoDetails
 import app.unlitube.android.data.VideoItem
@@ -95,7 +98,8 @@ import kotlinx.coroutines.launch
 
 // Phase 1: live data from Engine A (InnerTube calls made on the phone, see
 // data/YouTubeClient.kt). Home, search, watch, quality picker and related
-// videos are real. Library, downloads and account actions land in Phase 2.
+// videos are real. Slice 5 adds the local Room library: subscriptions,
+// history with resume, likes, Watch Later and playlists, all on the phone.
 
 private val feedFolders = listOf("All", "Study", "Music", "Gaming", "News", "Live", "Shorts")
 
@@ -115,6 +119,13 @@ fun HomeScreen(initialVideoId: String? = null) {
     var feedNonce by remember { mutableStateOf(0) }
     var openedVideoId by remember { mutableStateOf<String?>(initialVideoId) }
     var openedChannel by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var history by remember { mutableStateOf<List<HistoryEntity>>(emptyList()) }
+
+    LaunchedEffect(openedVideoId, selectedTab) {
+        if (openedVideoId == null) {
+            history = runCatching { LibraryStore.history() }.getOrDefault(emptyList())
+        }
+    }
 
     LaunchedEffect(selectedFolder, feedNonce) {
         feedState = FeedState.Loading
@@ -196,6 +207,7 @@ fun HomeScreen(initialVideoId: String? = null) {
                     0 -> HomeFeed(
                         feedState = feedState,
                         selectedFolder = selectedFolder,
+                        history = history,
                         onFolderSelected = { selectedFolder = it },
                         onRetry = { feedNonce++ },
                         onSearchTap = { selectedTab = 1 },
@@ -207,9 +219,10 @@ fun HomeScreen(initialVideoId: String? = null) {
                         onOpenVideo = { openedVideoId = it },
                         onOpenChannel = { id, name -> openedChannel = id to name }
                     )
-                    2 -> InfoScreen(
-                        title = "Library",
-                        body = "Downloads, local playlists, history and Custom Feeds arrive in Phase 2. Your feed, search and playback are already live."
+                    2 -> LibraryScreen(
+                        repository = repository,
+                        onOpenVideo = { openedVideoId = it },
+                        onOpenChannel = { id, name -> openedChannel = id to name }
                     )
                     else -> YouScreen()
                 }
@@ -223,6 +236,7 @@ fun HomeScreen(initialVideoId: String? = null) {
 private fun HomeFeed(
     feedState: FeedState,
     selectedFolder: String,
+    history: List<HistoryEntity>,
     onFolderSelected: (String) -> Unit,
     onRetry: () -> Unit,
     onSearchTap: () -> Unit,
@@ -249,6 +263,52 @@ private fun HomeFeed(
                 }
             }
         }
+        if (history.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Continue Watching",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+            items(history.take(5), key = { "continue-${it.videoId}" }) { entry ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .clickable { onOpenVideo(entry.videoId) }
+                ) {
+                    AsyncImage(
+                        model = entry.thumbnailUrl,
+                        contentDescription = entry.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(width = 112.dp, height = 63.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    )
+                    Spacer(modifier = Modifier.size(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = entry.title,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2
+                        )
+                        Text(
+                            text = if (entry.durationMs > 0) {
+                                "Resume at ${formatLibraryTime(entry.positionMs)} of ${formatLibraryTime(entry.durationMs)}"
+                            } else {
+                                entry.channel
+                            },
+                            fontSize = 12.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
         when (val state = feedState) {
             FeedState.Loading -> item { LoadingBlock("Loading your live feed") }
             is FeedState.Error -> item {
@@ -270,7 +330,7 @@ private fun HomeFeed(
         }
         item {
             Text(
-                text = "UnliTube 0.5.0 - themes, Lite Mode and settings, Phase 1",
+                text = "UnliTube 0.6.0 - local library, Phase 1 slice 5",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -667,6 +727,16 @@ private fun WatchContent(
     var speed by remember(video.id) { mutableStateOf(1.0f) }
     var dialog by remember(video.id) { mutableStateOf("none") }
     var descriptionExpanded by remember(video.id) { mutableStateOf(false) }
+    var liked by remember(video.id) { mutableStateOf(false) }
+    var watchLater by remember(video.id) { mutableStateOf(false) }
+    var showSaveDialog by remember(video.id) { mutableStateOf(false) }
+    var savePlaylists by remember(video.id) { mutableStateOf<List<PlaylistEntity>>(emptyList()) }
+    var newPlaylistName by remember(video.id) { mutableStateOf("") }
+
+    LaunchedEffect(video.id) {
+        liked = runCatching { LibraryStore.isLiked(video.id) }.getOrDefault(false)
+        watchLater = runCatching { LibraryStore.isWatchLater(video.id) }.getOrDefault(false)
+    }
 
     val scope = rememberCoroutineScope()
     var comments by remember(video.id) { mutableStateOf<List<CommentItem>?>(null) }
@@ -725,18 +795,28 @@ private fun WatchContent(
                 val index = details.defaultStreamIndex.coerceIn(0, details.streams.lastIndex)
                 chosenStreamIndex = index
                 player.play(details.streams[index])
+                val resumeMs = runCatching { LibraryStore.historyPosition(video.id) }
+                    .getOrDefault(0L)
+                if (resumeMs > 10000L) player.seekTo(resumeMs)
             }
             PlayerHolder.startService(context)
         }
     }
 
     LaunchedEffect(player, fallbackMode) {
+        var lastSavedMs = 0L
         while (true) {
             isPlaying = player.exoPlayer.isPlaying
             isBuffering = player.exoPlayer.playbackState == Player.STATE_BUFFERING
             positionMs = player.exoPlayer.currentPosition.coerceAtLeast(0L)
             val duration = player.exoPlayer.duration
             durationMs = if (duration > 0) duration else 0L
+            if (!fallbackMode && positionMs > 0 &&
+                kotlin.math.abs(positionMs - lastSavedMs) >= 10000L
+            ) {
+                lastSavedMs = positionMs
+                runCatching { LibraryStore.saveHistory(video, positionMs, durationMs) }
+            }
             delay(400)
         }
     }
@@ -919,6 +999,24 @@ private fun WatchContent(
                         )
                     }) { Text("Open in YouTube") }
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            liked = LibraryStore.toggleLiked(video)
+                        }
+                    }) { Text(if (liked) "Liked" else "Like") }
+                    TextButton(onClick = {
+                        scope.launch {
+                            watchLater = LibraryStore.toggleWatchLater(video)
+                        }
+                    }) { Text(if (watchLater) "In Watch Later" else "Watch Later") }
+                    TextButton(onClick = {
+                        scope.launch {
+                            savePlaylists = LibraryStore.playlists()
+                            showSaveDialog = true
+                        }
+                    }) { Text("Save") }
+                }
                 if (fallbackMode) {
                     Text(
                         text = "Fallback Mode: the official embed player is showing this video.",
@@ -1055,6 +1153,61 @@ private fun WatchContent(
                 )
             }
         }
+    }
+
+    if (showSaveDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveDialog = false },
+            title = { Text("Save to playlist") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (savePlaylists.isEmpty()) {
+                        Text(
+                            text = "No playlists yet. Create one below, then save again.",
+                            fontSize = 13.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        savePlaylists.forEach { playlist ->
+                            Text(
+                                text = playlist.name,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        scope.launch {
+                                            LibraryStore.addToPlaylist(playlist.playlistId, video)
+                                            showSaveDialog = false
+                                        }
+                                    }
+                                    .padding(vertical = 8.dp)
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = newPlaylistName,
+                        onValueChange = { newPlaylistName = it },
+                        label = { Text("New playlist name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (newPlaylistName.isNotBlank()) {
+                        Button(onClick = {
+                            scope.launch {
+                                val id = LibraryStore.createPlaylist(newPlaylistName.trim())
+                                LibraryStore.addToPlaylist(id, video)
+                                newPlaylistName = ""
+                                showSaveDialog = false
+                            }
+                        }) { Text("Create and save") }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSaveDialog = false }) { Text("Close") }
+            }
+        )
     }
 
     if (dialog == "quality") {
@@ -1263,6 +1416,8 @@ private fun ChannelScreen(
     var loadError by remember(channelId) { mutableStateOf<String?>(null) }
     var nonce by remember(channelId) { mutableStateOf(0) }
     var descriptionExpanded by remember(channelId) { mutableStateOf(false) }
+    var subscribed by remember(channelId) { mutableStateOf(false) }
+    val channelScope = rememberCoroutineScope()
 
     LaunchedEffect(channelId, nonce) {
         page = null
@@ -1270,6 +1425,10 @@ private fun ChannelScreen(
         runCatching { repository.loadChannel(channelId) }
             .onSuccess { page = it }
             .onFailure { loadError = it.message ?: "Could not load this channel" }
+    }
+
+    LaunchedEffect(channelId) {
+        subscribed = runCatching { LibraryStore.isSubscribed(channelId) }.getOrDefault(false)
     }
 
     val loaded = page
@@ -1353,11 +1512,26 @@ private fun ChannelScreen(
                             modifier = Modifier.clickable { descriptionExpanded = !descriptionExpanded }
                         )
                     }
-                    Text(
-                        text = "Local subscriptions for channels arrive in Phase 2.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            channelScope.launch {
+                                val info = loaded?.info
+                                subscribed = LibraryStore.toggleSubscribe(
+                                    channelId,
+                                    info?.name ?: fallbackName,
+                                    info?.avatarUrl
+                                )
+                            }
+                        }) {
+                            Text(if (subscribed) "Subscribed" else "Subscribe")
+                        }
+                        Text(
+                            text = "Saved locally on this phone.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.CenterVertically)
+                        )
+                    }
                 }
             }
         }
@@ -1562,7 +1736,7 @@ private fun YouScreen() {
         }
         item {
             Text(
-                text = "UnliTube 0.5.0 - Phase 1",
+                text = "UnliTube 0.6.0 - Phase 1 slice 5",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
