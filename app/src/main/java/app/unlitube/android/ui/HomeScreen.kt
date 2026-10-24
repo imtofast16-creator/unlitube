@@ -85,7 +85,9 @@ import androidx.media3.common.Player
 import app.unlitube.android.data.ChannelPage
 import app.unlitube.android.data.CommentItem
 import app.unlitube.android.BuildConfig
+import app.unlitube.android.data.ClipEntity
 import app.unlitube.android.data.DownloadStore
+import app.unlitube.android.data.FocusNoteEntity
 import app.unlitube.android.data.HistoryEntity
 import app.unlitube.android.data.LibraryStore
 import app.unlitube.android.data.PlaylistEntity
@@ -481,7 +483,7 @@ private fun HomeFeed(
         }
         item {
             Text(
-                text = "UnliTube 0.9.0 - premium UI redesign",
+                text = "UnliTube 0.10.0 - Focus notes and ClipForge, slice 8",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -1056,6 +1058,17 @@ private fun WatchContent(
     var downloadStatus by remember(video.id) { mutableStateOf<String?>(null) }
     var sponsorSegments by remember(video.id) { mutableStateOf<List<SponsorSegment>>(emptyList()) }
     var skippedSegment by remember(video.id) { mutableStateOf<SponsorSegment?>(null) }
+    var focusNotes by remember(video.id) { mutableStateOf<List<FocusNoteEntity>>(emptyList()) }
+    var newNoteText by remember(video.id) { mutableStateOf("") }
+    var savedClips by remember(video.id) { mutableStateOf<List<ClipEntity>>(emptyList()) }
+    var clipStartMs by remember(video.id) { mutableStateOf<Long?>(null) }
+    var clipEndMs by remember(video.id) { mutableStateOf<Long?>(null) }
+    var clipTitle by remember(video.id) { mutableStateOf("") }
+
+    LaunchedEffect(video.id) {
+        focusNotes = runCatching { LibraryStore.notesForVideo(video.id) }.getOrDefault(emptyList())
+        savedClips = runCatching { LibraryStore.clipsForVideo(video.id) }.getOrDefault(emptyList())
+    }
 
     LaunchedEffect(video.id) {
         if (SettingsStore.sponsorBlockEnabled) {
@@ -1147,6 +1160,11 @@ private fun WatchContent(
                 if (resumeMs > 10000L) player.seekTo(resumeMs)
             }
             PlayerHolder.startService(context)
+        }
+        if (LibraryStore.pendingClipVideoId == video.id) {
+            val clipStart = LibraryStore.pendingClipStartMs
+            LibraryStore.pendingClipVideoId = null
+            if (clipStart > 0L && !fallbackMode) player.seekTo(clipStart)
         }
     }
 
@@ -1474,6 +1492,158 @@ private fun WatchContent(
                             color = UnliViolet,
                             fontWeight = FontWeight.SemiBold
                         )
+                    }
+                }
+            }
+        }
+
+        item {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(text = "Focus notes", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Tap a note to jump to that moment. Notes stay on this phone.",
+                    fontSize = 12.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = newNoteText,
+                    onValueChange = { newNoteText = it },
+                    label = { Text("Write a note") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(
+                    onClick = {
+                        if (newNoteText.isNotBlank()) {
+                            val text = newNoteText
+                            val at = positionMs
+                            newNoteText = ""
+                            scope.launch {
+                                LibraryStore.addNote(video, at, text.trim())
+                                focusNotes = LibraryStore.notesForVideo(video.id)
+                            }
+                        }
+                    },
+                    enabled = newNoteText.isNotBlank()
+                ) {
+                    Text("Add note at ${formatLibraryTime(positionMs)}")
+                }
+                if (focusNotes.isNotEmpty()) {
+                    Button(onClick = {
+                        val body = buildString {
+                            appendLine(video.title)
+                            appendLine("https://www.youtube.com/watch?v=${video.id}")
+                            focusNotes.forEach { note ->
+                                appendLine("${formatLibraryTime(note.positionMs)} - ${note.text}")
+                            }
+                        }
+                        val share = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, body)
+                        }
+                        context.startActivity(Intent.createChooser(share, "Share notes"))
+                    }) { Text("Share notes as text") }
+                }
+                focusNotes.forEach { note ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = formatLibraryTime(note.positionMs),
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = UnliViolet
+                            )
+                            Text(text = note.text, fontSize = 14.sp)
+                        }
+                        TextButton(onClick = { player.seekTo(note.positionMs) }) { Text("Jump") }
+                        TextButton(onClick = {
+                            scope.launch {
+                                LibraryStore.deleteNote(note.noteId)
+                                focusNotes = LibraryStore.notesForVideo(video.id)
+                            }
+                        }) { Text("Delete") }
+                    }
+                }
+            }
+        }
+
+        item {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(text = "ClipForge", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Mark a start and end, save the clip, and share a link that opens at the start. UnliTube does not render a video file, the link is the clip.",
+                    fontSize = 12.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { clipStartMs = positionMs }) {
+                        Text(
+                            if (clipStartMs == null) "Mark start" else "Start ${formatLibraryTime(clipStartMs ?: 0L)}"
+                        )
+                    }
+                    Button(onClick = { clipEndMs = positionMs }) {
+                        Text(
+                            if (clipEndMs == null) "Mark end" else "End ${formatLibraryTime(clipEndMs ?: 0L)}"
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = clipTitle,
+                    onValueChange = { clipTitle = it },
+                    label = { Text("Clip title (optional)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                val start = clipStartMs
+                val end = clipEndMs
+                Button(
+                    onClick = {
+                        if (start != null && end != null && end > start) {
+                            val title = clipTitle.ifBlank {
+                                "${video.title} (${formatLibraryTime(start)}-${formatLibraryTime(end)})"
+                            }
+                            clipTitle = ""
+                            clipStartMs = null
+                            clipEndMs = null
+                            scope.launch {
+                                LibraryStore.addClip(video, start, end, title)
+                                savedClips = LibraryStore.clipsForVideo(video.id)
+                            }
+                        }
+                    },
+                    enabled = start != null && end != null && (end ?: 0L) > (start ?: 0L)
+                ) { Text("Save clip") }
+                savedClips.forEach { clip ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = clip.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = "${formatLibraryTime(clip.startMs)} - ${formatLibraryTime(clip.endMs)}",
+                                fontSize = 12.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = { player.seekTo(clip.startMs) }) { Text("Play") }
+                        TextButton(onClick = {
+                            val share = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(
+                                    Intent.EXTRA_TEXT,
+                                    "https://www.youtube.com/watch?v=${video.id}&t=${clip.startMs / 1000}s"
+                                )
+                            }
+                            context.startActivity(Intent.createChooser(share, "Share clip"))
+                        }) { Text("Share") }
+                        TextButton(onClick = {
+                            scope.launch {
+                                LibraryStore.deleteClip(clip.clipId)
+                                savedClips = LibraryStore.clipsForVideo(video.id)
+                            }
+                        }) { Text("Delete") }
                     }
                 }
             }
@@ -2258,7 +2428,7 @@ private fun YouScreen() {
         }
         item {
             Text(
-                text = "UnliTube 0.9.0 - UI polish",
+                text = "UnliTube 0.10.0 - slice 8",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
