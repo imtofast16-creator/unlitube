@@ -30,7 +30,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Pause
@@ -53,6 +57,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -79,10 +84,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
 import app.unlitube.android.data.ChannelPage
 import app.unlitube.android.data.CommentItem
+import app.unlitube.android.BuildConfig
 import app.unlitube.android.data.DownloadStore
 import app.unlitube.android.data.HistoryEntity
 import app.unlitube.android.data.LibraryStore
 import app.unlitube.android.data.PlaylistEntity
+import app.unlitube.android.data.RemoteVersion
+import app.unlitube.android.data.SponsorBlockClient
+import app.unlitube.android.data.SponsorSegment
+import app.unlitube.android.data.UpdateCheck
 import app.unlitube.android.data.SettingsStore
 import app.unlitube.android.data.VideoDetails
 import app.unlitube.android.data.VideoItem
@@ -113,9 +123,28 @@ private sealed interface FeedState {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(initialVideoId: String? = null) {
+    val context = LocalContext.current
     val repository = remember { YouTubeRepository() }
+    var updateAvailable by remember { mutableStateOf<RemoteVersion?>(null) }
+
+    LaunchedEffect(Unit) {
+        val remote = runCatching { UpdateCheck.fetch() }.getOrNull()
+        if (remote != null && remote.versionCode > BuildConfig.VERSION_CODE &&
+            remote.apkUrl.isNotBlank()
+        ) {
+            updateAvailable = remote
+        }
+    }
+
+
     var selectedTab by remember { mutableStateOf(0) }
     var selectedFolder by remember { mutableStateOf("All") }
+
+    LaunchedEffect(SettingsStore.hideShorts) {
+        if (SettingsStore.hideShorts && selectedFolder == "Shorts") {
+            selectedFolder = "All"
+        }
+    }
     var feedState by remember { mutableStateOf<FeedState>(FeedState.Loading) }
     var feedNonce by remember { mutableStateOf(0) }
     var openedVideoId by remember { mutableStateOf<String?>(initialVideoId) }
@@ -143,38 +172,53 @@ fun HomeScreen(initialVideoId: String? = null) {
     Scaffold(
         bottomBar = {
             if (openedVideoId == null) {
-                Column {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     if (PlayerHolder.nowPlaying != null && !PlayerHolder.embedOnly) {
                         MiniPlayerBar(
                             onOpen = { openedVideoId = PlayerHolder.nowPlaying?.id },
                             onClose = { PlayerHolder.stopAndClear() }
                         )
                     }
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    NavigationBarItem(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        icon = { Icon(Icons.Filled.Home, contentDescription = "Home") },
-                        label = { Text("Home") }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        icon = { Icon(Icons.Filled.Search, contentDescription = "Search") },
-                        label = { Text("Search") }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 2,
-                        onClick = { selectedTab = 2 },
-                        icon = { Icon(Icons.Filled.Subscriptions, contentDescription = "Library") },
-                        label = { Text("Library") }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 3,
-                        onClick = { selectedTab = 3 },
-                        icon = { Icon(Icons.Filled.Person, contentDescription = "You") },
-                        label = { Text("You") }
-                    )
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(28.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shadowElevation = 8.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            NavPillItem(
+                                selected = selectedTab == 0,
+                                onClick = { selectedTab = 0 },
+                                icon = Icons.Filled.Home,
+                                label = "Home"
+                            )
+                            NavPillItem(
+                                selected = selectedTab == 1,
+                                onClick = { selectedTab = 1 },
+                                icon = Icons.Filled.Search,
+                                label = "Search"
+                            )
+                            NavPillItem(
+                                selected = selectedTab == 2,
+                                onClick = { selectedTab = 2 },
+                                icon = Icons.Filled.Subscriptions,
+                                label = "Library"
+                            )
+                            NavPillItem(
+                                selected = selectedTab == 3,
+                                onClick = { selectedTab = 3 },
+                                icon = Icons.Filled.Person,
+                                label = "You"
+                            )
+                        }
                     }
                 }
             }
@@ -205,7 +249,9 @@ fun HomeScreen(initialVideoId: String? = null) {
                 )
             } else {
                 when (selectedTab) {
-                    0 -> HomeFeed(
+                    0 -> if (SettingsStore.searchOnlyMode) {
+                        SearchOnlyHome(onSearchTap = { selectedTab = 1 })
+                    } else HomeFeed(
                         feedState = feedState,
                         selectedFolder = selectedFolder,
                         history = history,
@@ -229,6 +275,89 @@ fun HomeScreen(initialVideoId: String? = null) {
                 }
             }
         }
+    }
+
+    val available = updateAvailable
+    if (available != null) {
+        AlertDialog(
+            onDismissRequest = { updateAvailable = null },
+            title = { Text("Update available: ${available.versionName}") },
+            text = { Text(available.notes) },
+            confirmButton = {
+                TextButton(onClick = {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(available.apkUrl))
+                    )
+                    updateAvailable = null
+                }) { Text("Download") }
+            },
+            dismissButton = {
+                TextButton(onClick = { updateAvailable = null }) { Text("Later") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SearchOnlyHome(onSearchTap: () -> Unit) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item { Header(onSearchTap = onSearchTap) }
+        item {
+            Text(
+                text = "Search-only mode is on. The feed, Shorts and recommendations are hidden. Turn it off in the You tab to bring the feed back.",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun NavPillItem(
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    Color.Transparent
+                }
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier.size(22.dp)
+        )
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = if (selected) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
     }
 }
 
@@ -255,7 +384,7 @@ private fun HomeFeed(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(feedFolders) { folder ->
+                items(if (SettingsStore.hideShorts) feedFolders - "Shorts" else feedFolders) { folder ->
                     FilterChip(
                         selected = selectedFolder == folder,
                         onClick = { onFolderSelected(folder) },
@@ -273,39 +402,53 @@ private fun HomeFeed(
                     modifier = Modifier.padding(horizontal = 16.dp)
                 )
             }
-            items(history.take(5), key = { "continue-${it.videoId}" }) { entry ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .clickable { onOpenVideo(entry.videoId) }
+            item {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    AsyncImage(
-                        model = entry.thumbnailUrl,
-                        contentDescription = entry.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(width = 112.dp, height = 63.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                    )
-                    Spacer(modifier = Modifier.size(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = entry.title,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 2
-                        )
-                        Text(
-                            text = if (entry.durationMs > 0) {
-                                "Resume at ${formatLibraryTime(entry.positionMs)} of ${formatLibraryTime(entry.durationMs)}"
+                    items(history.take(8), key = { "continue-${it.videoId}" }) { entry ->
+                        Column(
+                            modifier = Modifier
+                                .size(width = 164.dp, height = 150.dp)
+                                .clickable { onOpenVideo(entry.videoId) }
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                AsyncImage(
+                                    model = entry.thumbnailUrl,
+                                    contentDescription = entry.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            val fraction = if (entry.durationMs > 0) {
+                                (entry.positionMs.toFloat() / entry.durationMs.toFloat())
+                                    .coerceIn(0f, 1f)
                             } else {
-                                entry.channel
-                            },
-                            fontSize = 12.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                                0f
+                            }
+                            LinearProgressIndicator(
+                                progress = { fraction },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = UnliViolet,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = entry.title,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2,
+                                lineHeight = 16.sp
+                            )
+                        }
                     }
                 }
             }
@@ -319,8 +462,15 @@ private fun HomeFeed(
                 if (state.items.isEmpty()) {
                     item { ErrorBlock(message = "The feed came back empty.", onRetry = onRetry) }
                 } else {
-                    items(state.items, key = { it.id }) { video ->
-                        VideoCard(
+                    item {
+                        HeroCard(
+                            video = state.items.first(),
+                            onClick = { onOpenVideo(state.items.first().id) },
+                            onChannelClick = { id, name -> onOpenChannel(id, name) }
+                        )
+                    }
+                    items(state.items.drop(1), key = { it.id }) { video ->
+                        VideoRow(
                             video = video,
                             onClick = { onOpenVideo(video.id) },
                             onChannelClick = { id, name -> onOpenChannel(id, name) }
@@ -331,7 +481,7 @@ private fun HomeFeed(
         }
         item {
             Text(
-                text = "UnliTube 0.7.0 - downloads and offline playback, slice 6",
+                text = "UnliTube 0.9.0 - premium UI redesign",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -490,8 +640,8 @@ private fun Header(onSearchTap: () -> Unit) {
         ) {
             Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(9.dp))
                     .background(Brush.linearGradient(listOf(UnliViolet, UnliCoral))),
                 contentAlignment = Alignment.Center
             ) {
@@ -499,16 +649,30 @@ private fun Header(onSearchTap: () -> Unit) {
                     Icons.Filled.PlayArrow,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
             Spacer(modifier = Modifier.size(10.dp))
             Text(
                 text = "UnliTube",
-                fontSize = 22.sp,
+                fontSize = 20.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onBackground
             )
+            Spacer(modifier = Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            ) {
+                Text(
+                    text = "Guest",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
         Spacer(modifier = Modifier.height(14.dp))
         Box(
@@ -531,6 +695,166 @@ private fun Header(onSearchTap: () -> Unit) {
                     text = "Search videos, channels, live",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 14.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+@Composable
+private fun HeroCard(
+    video: VideoItem,
+    onClick: () -> Unit,
+    onChannelClick: ((String, String) -> Unit)? = null
+) {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .clickable { onClick() }
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            AsyncImage(
+                model = video.thumbnailUrl,
+                contentDescription = video.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)),
+                            startY = 300f
+                        )
+                    )
+            )
+            val badge = when {
+                video.isLive -> "LIVE"
+                !video.durationText.isNullOrBlank() -> video.durationText
+                else -> null
+            }
+            if (badge != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (video.isLive) UnliCoral else Color.Black.copy(alpha = 0.72f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(text = badge, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(14.dp)
+            ) {
+                Text(
+                    text = video.title,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 2,
+                    lineHeight = 21.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = listOfNotNull(
+                        video.channel.takeIf { it.isNotBlank() },
+                        video.viewCountText,
+                        video.publishedText
+                    ).joinToString(" - "),
+                    fontSize = 12.5.sp,
+                    color = Color.White.copy(alpha = 0.85f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VideoRow(
+    video: VideoItem,
+    onClick: () -> Unit,
+    onChannelClick: ((String, String) -> Unit)? = null
+) {
+    val channelTap: (() -> Unit)? = if (onChannelClick != null && video.channelId != null) {
+        { onChannelClick(video.channelId, video.channel) }
+    } else {
+        null
+    }
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .clickable { onClick() },
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 156.dp, height = 88.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            AsyncImage(
+                model = video.thumbnailUrl,
+                contentDescription = video.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            val badge = when {
+                video.isLive -> "LIVE"
+                !video.durationText.isNullOrBlank() -> video.durationText
+                else -> null
+            }
+            if (badge != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (video.isLive) UnliCoral else Color.Black.copy(alpha = 0.72f))
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                ) {
+                    Text(text = badge, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.size(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = video.title,
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                lineHeight = 18.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = video.channel,
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = if (channelTap != null) {
+                    Modifier.clickable { channelTap() }
+                } else {
+                    Modifier
+                }
+            )
+            val meta = listOfNotNull(video.viewCountText, video.publishedText)
+                .joinToString(" - ")
+            if (meta.isNotBlank()) {
+                Text(
+                    text = meta,
+                    fontSize = 12.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -731,6 +1055,15 @@ private fun WatchContent(
     var liked by remember(video.id) { mutableStateOf(false) }
     var watchLater by remember(video.id) { mutableStateOf(false) }
     var downloadStatus by remember(video.id) { mutableStateOf<String?>(null) }
+    var sponsorSegments by remember(video.id) { mutableStateOf<List<SponsorSegment>>(emptyList()) }
+    var skippedSegment by remember(video.id) { mutableStateOf<SponsorSegment?>(null) }
+
+    LaunchedEffect(video.id) {
+        if (SettingsStore.sponsorBlockEnabled) {
+            sponsorSegments = runCatching { SponsorBlockClient.fetch(video.id) }
+                .getOrDefault(emptyList())
+        }
+    }
     var showSaveDialog by remember(video.id) { mutableStateOf(false) }
     var savePlaylists by remember(video.id) { mutableStateOf<List<PlaylistEntity>>(emptyList()) }
     var newPlaylistName by remember(video.id) { mutableStateOf("") }
@@ -818,8 +1151,9 @@ private fun WatchContent(
         }
     }
 
-    LaunchedEffect(player, fallbackMode) {
+    LaunchedEffect(player, fallbackMode, sponsorSegments) {
         var lastSavedMs = 0L
+        var lastSkippedEnd = -1L
         while (true) {
             isPlaying = player.exoPlayer.isPlaying
             isBuffering = player.exoPlayer.playbackState == Player.STATE_BUFFERING
@@ -831,6 +1165,16 @@ private fun WatchContent(
             ) {
                 lastSavedMs = positionMs
                 runCatching { LibraryStore.saveHistory(video, positionMs, durationMs) }
+            }
+            if (!fallbackMode && SettingsStore.sponsorBlockEnabled) {
+                val hit = sponsorSegments.firstOrNull { segment ->
+                    positionMs in segment.startMs until (segment.endMs - 500L)
+                }
+                if (hit != null && hit.endMs != lastSkippedEnd) {
+                    lastSkippedEnd = hit.endMs
+                    skippedSegment = hit
+                    player.seekTo(hit.endMs)
+                }
             }
             delay(400)
         }
@@ -869,8 +1213,10 @@ private fun WatchContent(
         item {
             Box(
                 modifier = Modifier
+                    .padding(horizontal = 12.dp)
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(20.dp))
                     .background(Color.Black)
             ) {
                 if (fallbackMode) {
@@ -1015,46 +1361,58 @@ private fun WatchContent(
                     }) { Text("Open in YouTube") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = {
-                        scope.launch {
-                            liked = LibraryStore.toggleLiked(video)
+                    ActionChip(
+                        label = if (liked) "Liked" else "Like",
+                        icon = Icons.Filled.Favorite,
+                        active = liked,
+                        onClick = {
+                            scope.launch { liked = LibraryStore.toggleLiked(video) }
                         }
-                    }) { Text(if (liked) "Liked" else "Like") }
-                    TextButton(onClick = {
-                        scope.launch {
-                            watchLater = LibraryStore.toggleWatchLater(video)
+                    )
+                    ActionChip(
+                        label = if (watchLater) "Saved" else "Watch Later",
+                        icon = Icons.Filled.Bookmark,
+                        active = watchLater,
+                        onClick = {
+                            scope.launch { watchLater = LibraryStore.toggleWatchLater(video) }
                         }
-                    }) { Text(if (watchLater) "In Watch Later" else "Watch Later") }
-                    TextButton(onClick = {
-                        scope.launch {
-                            savePlaylists = LibraryStore.playlists()
-                            showSaveDialog = true
+                    )
+                    ActionChip(
+                        label = "Save",
+                        icon = Icons.Filled.Bookmark,
+                        active = false,
+                        onClick = {
+                            scope.launch {
+                                savePlaylists = LibraryStore.playlists()
+                                showSaveDialog = true
+                            }
                         }
-                    }) { Text("Save") }
-                    TextButton(onClick = {
-                        scope.launch {
-                            when (downloadStatus) {
-                                "completed" -> {
-                                    DownloadStore.deleteDownload(context, video.id)
-                                    downloadStatus = null
-                                }
-                                "downloading" -> Unit
-                                else -> {
-                                    downloadStatus = "downloading"
-                                    DownloadStore.startDownload(context, details)
+                    )
+                    ActionChip(
+                        label = when (downloadStatus) {
+                            "completed" -> "Downloaded"
+                            "downloading" -> "Downloading"
+                            "failed" -> "Retry download"
+                            else -> "Download"
+                        },
+                        icon = Icons.Filled.Download,
+                        active = downloadStatus == "completed",
+                        onClick = {
+                            scope.launch {
+                                when (downloadStatus) {
+                                    "completed" -> {
+                                        DownloadStore.deleteDownload(context, video.id)
+                                        downloadStatus = null
+                                    }
+                                    "downloading" -> Unit
+                                    else -> {
+                                        downloadStatus = "downloading"
+                                        DownloadStore.startDownload(context, details)
+                                    }
                                 }
                             }
                         }
-                    }) {
-                        Text(
-                            when (downloadStatus) {
-                                "completed" -> "Downloaded"
-                                "downloading" -> "Downloading..."
-                                "failed" -> "Download failed, retry"
-                                else -> "Download"
-                            }
-                        )
-                    }
+                    )
                 }
                 if (fallbackMode) {
                     Text(
@@ -1073,6 +1431,21 @@ private fun WatchContent(
                         }) {
                             Text("Use fallback player")
                         }
+                    }
+                }
+                val skipped = skippedSegment
+                if (skipped != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Skipped a ${skipped.category} segment.",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = {
+                            player.seekTo(skipped.startMs)
+                            skippedSegment = null
+                        }) { Text("Undo") }
                     }
                 }
                 if (details.description.isNotBlank()) {
@@ -1107,16 +1480,18 @@ private fun WatchContent(
             }
         }
 
-        item {
-            Text(
-                text = "Comments",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp)
-            )
+        if (!SettingsStore.hideComments) {
+            item {
+                Text(
+                    text = "Comments",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
         }
         val commentList = comments
-        when {
+        if (!SettingsStore.hideComments) when {
             commentsError != null -> item {
                 Text(
                     text = commentsError ?: "Comments failed to load",
@@ -1174,8 +1549,7 @@ private fun WatchContent(
                 }
             }
         }
-
-        if (details.related.isNotEmpty()) {
+        if (!SettingsStore.hideRelated && details.related.isNotEmpty()) {
             item {
                 Text(
                     text = "Up next",
@@ -1624,16 +1998,18 @@ private fun MiniPlayerBar(onOpen: () -> Unit, onClose: () -> Unit) {
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shadowElevation = 6.dp
     ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onOpen() }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
@@ -1641,9 +2017,9 @@ private fun MiniPlayerBar(onOpen: () -> Unit, onClose: () -> Unit) {
                 contentDescription = video.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(width = 104.dp, height = 58.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .size(width = 96.dp, height = 54.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surface)
             )
             Spacer(modifier = Modifier.size(10.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -1683,11 +2059,17 @@ private fun MiniPlayerBar(onOpen: () -> Unit, onClose: () -> Unit) {
             trackColor = MaterialTheme.colorScheme.surfaceVariant
         )
     }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun YouScreen() {
+    val youContext = LocalContext.current
+    val youScope = rememberCoroutineScope()
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var updateResult by remember { mutableStateOf<String?>(null) }
+    var manualUpdate by remember { mutableStateOf<RemoteVersion?>(null) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -1774,11 +2156,177 @@ private fun YouScreen() {
             }
         }
         item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "Distraction Shield", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Hide parts of the app that pull you in. These are local settings only.",
+                    fontSize = 12.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ShieldRow(
+                    label = "Hide Shorts",
+                    description = "Removes the Shorts folder from the home feed.",
+                    checked = SettingsStore.hideShorts,
+                    onChange = { SettingsStore.updateHideShorts(it) }
+                )
+                ShieldRow(
+                    label = "Hide comments",
+                    description = "Hides the comments section on watch pages.",
+                    checked = SettingsStore.hideComments,
+                    onChange = { SettingsStore.updateHideComments(it) }
+                )
+                ShieldRow(
+                    label = "Hide Up next",
+                    description = "Hides related videos on watch pages.",
+                    checked = SettingsStore.hideRelated,
+                    onChange = { SettingsStore.updateHideRelated(it) }
+                )
+                ShieldRow(
+                    label = "Search-only mode",
+                    description = "Home shows only the search box, no feed at all.",
+                    checked = SettingsStore.searchOnlyMode,
+                    onChange = { SettingsStore.updateSearchOnlyMode(it) }
+                )
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "SponsorBlock", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                ShieldRow(
+                    label = "Skip sponsor segments",
+                    description = "Skips community-marked sponsor, intro, outro and self-promo segments, with an Undo button when a skip happens.",
+                    checked = SettingsStore.sponsorBlockEnabled,
+                    onChange = { SettingsStore.updateSponsorBlockEnabled(it) }
+                )
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "Updates", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Button(
+                    onClick = {
+                        checkingUpdate = true
+                        updateResult = null
+                        manualUpdate = null
+                        youScope.launch {
+                            val remote = runCatching { UpdateCheck.fetch() }.getOrNull()
+                            checkingUpdate = false
+                            if (remote == null) {
+                                updateResult = "Could not reach the update server."
+                            } else if (remote.versionCode > BuildConfig.VERSION_CODE) {
+                                manualUpdate = remote
+                                updateResult = "Version ${remote.versionName} is available."
+                            } else {
+                                updateResult = "You are on the latest version."
+                            }
+                        }
+                    },
+                    enabled = !checkingUpdate
+                ) {
+                    Text(if (checkingUpdate) "Checking..." else "Check for updates")
+                }
+                updateResult?.let { result ->
+                    Text(
+                        text = result,
+                        fontSize = 13.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                val availableManual = manualUpdate
+                if (availableManual != null) {
+                    if (availableManual.notes.isNotBlank()) {
+                        Text(
+                            text = availableManual.notes,
+                            fontSize = 13.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (availableManual.apkUrl.isNotBlank()) {
+                        Button(onClick = {
+                            youContext.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(availableManual.apkUrl))
+                            )
+                        }) { Text("Download update") }
+                    } else {
+                        Text(
+                            text = "Get it at unlitube.vercel.app",
+                            fontSize = 13.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+        item {
             Text(
-                text = "UnliTube 0.7.0 - slice 6",
+                text = "UnliTube 0.9.0 - UI polish",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+@Composable
+private fun ActionChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    active: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                if (active) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                }
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 9.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (active) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.size(6.dp))
+        Text(
+            text = label,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
+private fun ShieldRow(
+    label: String,
+    description: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = label, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = description,
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
