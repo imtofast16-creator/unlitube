@@ -28,6 +28,17 @@ private val DarkColors = darkColorScheme(
     onSurfaceVariant = UnliTextSecondary
 )
 
+private val AmoledColors = darkColorScheme(
+    primary = UnliViolet,
+    secondary = UnliCoral,
+    background = Color.Black,
+    surface = Color(0xFF050507),
+    surfaceVariant = Color(0xFF0E0E13),
+    onBackground = UnliTextPrimary,
+    onSurface = UnliTextPrimary,
+    onSurfaceVariant = UnliTextSecondary
+)
+
 private val LightColors = lightColorScheme(
     primary = UnliViolet,
     secondary = UnliCoral,
@@ -40,10 +51,15 @@ private val LightColors = lightColorScheme(
 @Composable
 fun UnliTubeTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    amoled: Boolean = false,
     content: @Composable () -> Unit
 ) {
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = when {
+            darkTheme && amoled -> AmoledColors
+            darkTheme -> DarkColors
+            else -> LightColors
+        },
         content = content
     )
 }
