@@ -35,9 +35,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.unlitube.android.data.DownloadEntity
+import app.unlitube.android.data.DownloadStore
 import app.unlitube.android.data.HistoryEntity
 import app.unlitube.android.data.LibraryStore
 import app.unlitube.android.data.LikedEntity
@@ -62,11 +65,13 @@ fun LibraryScreen(
     onOpenChannel: (String, String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var nonce by remember { mutableStateOf(0) }
     var subscriptions by remember { mutableStateOf<List<SubscriptionEntity>>(emptyList()) }
     var history by remember { mutableStateOf<List<HistoryEntity>>(emptyList()) }
     var liked by remember { mutableStateOf<List<LikedEntity>>(emptyList()) }
     var watchLater by remember { mutableStateOf<List<WatchLaterEntity>>(emptyList()) }
+    var downloads by remember { mutableStateOf<List<DownloadEntity>>(emptyList()) }
     var playlists by remember { mutableStateOf<List<PlaylistEntity>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     var subFeed by remember { mutableStateOf<List<VideoItem>?>(null) }
@@ -81,6 +86,7 @@ fun LibraryScreen(
             history = LibraryStore.history()
             liked = LibraryStore.liked()
             watchLater = LibraryStore.watchLater()
+            downloads = LibraryStore.downloads()
             playlists = LibraryStore.playlists()
             loaded = true
         }
@@ -271,6 +277,40 @@ fun LibraryScreen(
                     channel = entry.channel,
                     thumbnailUrl = entry.thumbnailUrl,
                     onClick = { onOpenVideo(entry.videoId) }
+                )
+            }
+        }
+
+        item { SectionTitle("Downloads (${downloads.size})") }
+        if (downloads.isEmpty()) {
+            item {
+                Text(
+                    text = "Tap Download on a video to save it on this phone and watch it offline.",
+                    fontSize = 13.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            items(downloads, key = { "dl-${it.videoId}" }) { entry ->
+                val liveProgress = DownloadStore.progress[entry.videoId]
+                val statusText = when (entry.status) {
+                    "completed" -> "Downloaded, plays offline"
+                    "downloading" -> "Downloading ${liveProgress ?: entry.progress}%"
+                    "failed" -> "Download failed, retry from the watch page"
+                    else -> entry.status
+                }
+                LibraryVideoRow(
+                    title = entry.title,
+                    channel = entry.channel,
+                    thumbnailUrl = entry.thumbnailUrl,
+                    extra = statusText,
+                    onClick = { if (entry.status == "completed") onOpenVideo(entry.videoId) },
+                    onRemove = {
+                        scope.launch {
+                            DownloadStore.deleteDownload(context, entry.videoId)
+                            reload()
+                        }
+                    }
                 )
             }
         }
