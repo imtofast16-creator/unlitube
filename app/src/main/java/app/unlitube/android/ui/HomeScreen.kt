@@ -1509,7 +1509,7 @@ private fun YouScreen() {
                     ) { (value, label) ->
                         FilterChip(
                             selected = SettingsStore.themeMode == value,
-                            onClick = { SettingsStore.setThemeMode(value) },
+                            onClick = { SettingsStore.updateThemeMode(value) },
                             label = { Text(label) }
                         )
                     }
@@ -1533,7 +1533,7 @@ private fun YouScreen() {
                     }
                     Switch(
                         checked = SettingsStore.liteMode,
-                        onCheckedChange = { SettingsStore.setLiteMode(it) }
+                        onCheckedChange = { SettingsStore.updateLiteMode(it) }
                     )
                 }
                 Text(
@@ -1553,7 +1553,7 @@ private fun YouScreen() {
                     ) { (cap, label) ->
                         FilterChip(
                             selected = SettingsStore.qualityCap == cap,
-                            onClick = { SettingsStore.setQualityCap(cap) },
+                            onClick = { SettingsStore.updateQualityCap(cap) },
                             label = { Text(label) }
                         )
                     }
