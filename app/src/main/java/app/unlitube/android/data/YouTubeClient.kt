@@ -48,6 +48,36 @@ data class VideoDetails(
     val related: List<VideoItem>
 )
 
+data class ChannelInfo(
+    val id: String,
+    val name: String,
+    val subtitle: String? = null,
+    val avatarUrl: String? = null,
+    val description: String = ""
+)
+
+data class ChannelPage(
+    val info: ChannelInfo,
+    val videos: List<VideoItem>
+)
+
+data class CommentItem(
+    val id: String,
+    val author: String,
+    val authorAvatarUrl: String? = null,
+    val text: String,
+    val publishedText: String? = null,
+    val likeCountText: String? = null,
+    val replyCount: Int = 0,
+    val isPinned: Boolean = false,
+    val repliesToken: String? = null
+)
+
+data class CommentsPage(
+    val comments: List<CommentItem>,
+    val continuation: String? = null
+)
+
 /**
  * Engine A from PLAN.md Section 3: public InnerTube calls made directly from
  * the phone. No API key account, no Vercel relay, and no viewing data leaves
@@ -74,6 +104,15 @@ class YouTubeRepository {
         innerTube.search(query.trim(), continuation)
 
     suspend fun loadDetails(videoId: String): VideoDetails = innerTube.player(videoId)
+
+    suspend fun loadChannel(channelId: String): ChannelPage = innerTube.channel(channelId)
+
+    suspend fun loadComments(videoId: String): CommentsPage = innerTube.commentsFirstPage(videoId)
+
+    suspend fun loadMoreComments(continuation: String): CommentsPage =
+        innerTube.commentsPage(continuation)
+
+    suspend fun loadReplies(token: String): List<CommentItem> = innerTube.replies(token)
 
     private fun homeQueries(folder: String): List<String> = when (folder) {
         "Study" -> listOf("study tips and tutorials", "science documentary", "math lessons")
@@ -190,6 +229,62 @@ private class InnerTubeClient {
             .put("videoId", videoId)
         val response = post("next", body, android = false)
         return parseVideos(response).values.toList()
+    }
+
+    suspend fun channel(channelId: String): ChannelPage = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("context", webContext())
+            .put("browseId", channelId)
+        val response = post("browse", body, android = false)
+        var videos = parseVideos(response).values.toList()
+        if (videos.size < 5) {
+            // Ask for the Videos tab explicitly; newer channel layouts often
+            // ignore the token, in which case the first response already has
+            // the channel's video lockups and this simply merges nothing new.
+            val tabBody = JSONObject()
+                .put("context", webContext())
+                .put("browseId", channelId)
+                .put("params", "EgZ2aWRlb3M%3D")
+            runCatching { post("browse", tabBody, android = false) }
+                .getOrNull()
+                ?.let { tabResponse ->
+                    videos = (videos + parseVideos(tabResponse).values).distinctBy { it.id }
+                }
+        }
+        ChannelPage(info = parseChannelInfo(response, channelId), videos = videos)
+    }
+
+    suspend fun commentsFirstPage(videoId: String): CommentsPage = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("context", webContext())
+            .put("videoId", videoId)
+        val response = post("next", body, android = false)
+        val token = findCommentsSectionToken(response)
+            ?: return@withContext CommentsPage(emptyList())
+        commentsPage(token)
+    }
+
+    suspend fun commentsPage(continuation: String): CommentsPage = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("context", webContext())
+            .put("continuation", continuation)
+        val response = post("next", body, android = false)
+        CommentsPage(
+            comments = parseCommentThreads(response),
+            continuation = lastContinuationToken(response)
+        )
+    }
+
+    suspend fun replies(token: String): List<CommentItem> = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("context", webContext())
+            .put("continuation", token)
+        val response = post("next", body, android = false)
+        val seen = linkedMapOf<String, CommentItem>()
+        for (renderer in findObjects(response, "commentRenderer")) {
+            parseCommentRenderer(renderer, repliesToken = null)?.let { seen.putIfAbsent(it.id, it) }
+        }
+        seen.values.toList()
     }
 
     private fun post(endpoint: String, body: JSONObject, android: Boolean): JSONObject {
@@ -329,14 +424,152 @@ private fun parseLockup(lockup: JSONObject): VideoItem? {
             }
         }
     }
+    val badgeDuration = lockup.optJSONObject("contentImage")?.let { image ->
+        findObjects(image, "thumbnailBadgeViewModel")
+            .mapNotNull { it.optString("text").takeIf { text -> text.contains(":") } }
+            .firstOrNull()
+    }
     return VideoItem(
         id = id,
         title = title,
         channel = parts.getOrNull(0).orEmpty(),
         thumbnailUrl = thumbnail,
+        durationText = badgeDuration,
         viewCountText = parts.getOrNull(1),
         publishedText = parts.getOrNull(2)
     )
+}
+
+private fun parseChannelInfo(root: JSONObject, fallbackId: String): ChannelInfo {
+    val metadata = root.optJSONObject("metadata")?.optJSONObject("channelMetadataRenderer")
+    val name = metadata?.optString("title")?.takeIf { it.isNotBlank() }
+        ?: findHeaderChannelName(root)
+        ?: "Channel"
+    val avatar = metadata?.let { bestThumbnail(it.optJSONObject("avatar")) }?.takeIf { it.isNotBlank() }
+    val description = metadata?.optString("description").orEmpty()
+    return ChannelInfo(
+        id = metadata?.optString("externalId")?.takeIf { it.isNotBlank() } ?: fallbackId,
+        name = name,
+        subtitle = findHeaderSubtitle(root),
+        avatarUrl = avatar,
+        description = description
+    )
+}
+
+private fun findHeaderChannelName(root: JSONObject): String? {
+    val header = root.optJSONObject("header") ?: return null
+    for (viewModel in findObjects(header, "pageHeaderViewModel")) {
+        val content = viewModel.optJSONObject("title")
+            ?.optJSONObject("dynamicTextViewModel")
+            ?.optJSONObject("text")
+            ?.optString("content")
+        if (!content.isNullOrBlank()) return content
+    }
+    return null
+}
+
+private fun findHeaderSubtitle(root: JSONObject): String? {
+    val header = root.optJSONObject("header") ?: return null
+    for (viewModel in findObjects(header, "contentMetadataViewModel")) {
+        val rows = viewModel.optJSONArray("metadataRows") ?: continue
+        val parts = mutableListOf<String>()
+        for (i in 0 until rows.length()) {
+            val rowParts = rows.optJSONObject(i)?.optJSONArray("parts") ?: continue
+            for (j in 0 until rowParts.length()) {
+                rowParts.optJSONObject(j)?.optJSONObject("text")?.optString("content")
+                    ?.takeIf { it.isNotBlank() }?.let(parts::add)
+            }
+        }
+        if (parts.isNotEmpty()) return parts.joinToString(" - ")
+    }
+    return null
+}
+
+private fun findCommentsSectionToken(root: JSONObject): String? {
+    val panels = root.optJSONArray("engagementPanels") ?: return null
+    for (i in 0 until panels.length()) {
+        val section = panels.optJSONObject(i)?.optJSONObject("engagementPanelSectionListRenderer")
+            ?: continue
+        val identifier = section.optString("panelIdentifier")
+        if (!identifier.contains("comments")) continue
+        val tokens = findObjects(section, "continuationItemRenderer").mapNotNull { renderer ->
+            renderer.optJSONObject("continuationEndpoint")
+                ?.optJSONObject("continuationCommand")
+                ?.optString("token")
+                ?.takeIf { it.isNotBlank() }
+        }
+        if (tokens.isNotEmpty()) return tokens.first()
+    }
+    return null
+}
+
+private fun lastContinuationToken(root: JSONObject): String? {
+    val renderers = findObjects(root, "continuationItemRenderer")
+    for (renderer in renderers.asReversed()) {
+        val token = renderer.optJSONObject("continuationEndpoint")
+            ?.optJSONObject("continuationCommand")
+            ?.optString("token")
+            ?.takeIf { it.isNotBlank() }
+        if (token != null) return token
+    }
+    return null
+}
+
+private fun parseCommentThreads(root: JSONObject): List<CommentItem> {
+    val result = mutableListOf<CommentItem>()
+    for (thread in findObjects(root, "commentThreadRenderer")) {
+        val renderer = thread.optJSONObject("comment")?.optJSONObject("commentRenderer")
+            ?: continue
+        val repliesNode = thread.optJSONObject("replies")?.optJSONObject("commentRepliesRenderer")
+        val token = repliesNode?.let { findContinuationCommandToken(it) }
+        parseCommentRenderer(renderer, repliesToken = token)?.let(result::add)
+    }
+    return result
+}
+
+private fun parseCommentRenderer(renderer: JSONObject, repliesToken: String?): CommentItem? {
+    val id = renderer.optString("commentId").takeIf { it.isNotBlank() } ?: return null
+    val text = textValue(renderer.opt("contentText"))
+    if (text.isBlank()) return null
+    val likes = textValue(renderer.opt("voteCount")).takeIf { it.isNotBlank() }
+    return CommentItem(
+        id = id,
+        author = textValue(renderer.opt("authorText")),
+        authorAvatarUrl = bestThumbnail(renderer.optJSONObject("authorThumbnail"))
+            .takeIf { it.isNotBlank() },
+        text = text,
+        publishedText = textValue(renderer.opt("publishedTimeText")).takeIf { it.isNotBlank() },
+        likeCountText = likes,
+        replyCount = renderer.optInt("replyCount"),
+        isPinned = renderer.has("pinnedCommentBadge"),
+        repliesToken = repliesToken
+    )
+}
+
+private fun findContinuationCommandToken(node: Any?): String? {
+    var result: String? = null
+    fun walk(value: Any?) {
+        if (result != null) return
+        when (value) {
+            is JSONObject -> {
+                val token = value.optJSONObject("continuationCommand")?.optString("token")
+                if (!token.isNullOrBlank()) {
+                    result = token
+                    return
+                }
+                val keys = value.keys()
+                while (keys.hasNext() && result == null) walk(value.opt(keys.next()))
+            }
+            is JSONArray -> {
+                for (i in 0 until value.length()) {
+                    walk(value.opt(i))
+                    if (result != null) return
+                }
+            }
+        }
+    }
+    walk(node)
+    return result
 }
 
 private fun parseStreams(streaming: JSONObject?): List<StreamOption> {
