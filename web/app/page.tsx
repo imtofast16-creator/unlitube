@@ -63,8 +63,8 @@ export default function Home() {
           YouTube nor Pure Tuber has. Free, and it runs great on low end phones.
         </p>
         <div className="cta-row">
-          <a className="btn btn-primary" href="/install">Download the APK</a>
-          <a className="btn btn-ghost" href="#features">See the features</a>
+          <a className="btn btn-primary" href="https://github.com/imtofast16-creator/unlitube/releases/download/v1.0.0/UnliTube-1.0.0-debug.apk">Download the APK</a>
+          <a className="btn btn-ghost" href="/install">Install guide</a>
         </div>
         <p className="note">Android only. No Play Store needed, install in under a minute.</p>
       </section>
