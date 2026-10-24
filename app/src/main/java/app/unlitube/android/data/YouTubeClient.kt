@@ -91,7 +91,9 @@ class YouTubeRepository {
         val browsed = runCatching { innerTube.browseHome() }.getOrDefault(emptyList())
         if (browsed.size >= MIN_BROWSE_RESULTS) return browsed
 
-        val queries = homeQueries(folder)
+        val queries = homeQueries(folder).let { all ->
+            if (SettingsStore.liteMode) all.take(2) else all
+        }
         val pages = coroutineScope {
             queries.map { query ->
                 async { runCatching { innerTube.search(query).items }.getOrDefault(emptyList()) }
@@ -637,6 +639,15 @@ private fun parseStreams(streaming: JSONObject?): List<StreamOption> {
 
 private fun defaultStreamIndex(streams: List<StreamOption>): Int {
     if (streams.isEmpty()) return -1
+    val cap = SettingsStore.qualityCap
+    if (cap > 0) {
+        val capped = streams.withIndex()
+            .filter { (_, stream) ->
+                stream.height in 1..cap && (stream.audioUrl != null || stream.isMuxed)
+            }
+            .maxByOrNull { (_, stream) -> stream.height }
+        if (capped != null) return capped.index
+    }
     val preferred = streams.indexOfFirst { it.height in 361..720 && it.audioUrl != null }
     if (preferred >= 0) return preferred
     val withAudio = streams.indexOfFirst { it.audioUrl != null || it.isMuxed }
