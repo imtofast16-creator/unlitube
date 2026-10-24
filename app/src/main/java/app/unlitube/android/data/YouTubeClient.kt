@@ -493,23 +493,23 @@ private fun findObjects(root: Any?, key: String): List<JSONObject> {
     return found
 }
 
-private fun textValue(node: Any?): String = when (node) {
-    is JSONObject -> {
-        node.optString("simpleText").takeIf { it.isNotBlank() }?.let { return it }
-        val runs = node.optJSONArray("runs")
-        if (runs != null) {
-            val text = StringBuilder()
-            for (i in 0 until runs.length()) {
-                text.append(runs.optJSONObject(i)?.optString("text").orEmpty())
-            }
-            if (text.isNotBlank()) return text.toString()
+private fun textValue(node: Any?): String {
+    if (node is String) return node
+    if (node !is JSONObject) return ""
+    val simple = node.optString("simpleText")
+    if (simple.isNotBlank()) return simple
+    val runs = node.optJSONArray("runs")
+    if (runs != null) {
+        val text = StringBuilder()
+        for (i in 0 until runs.length()) {
+            text.append(runs.optJSONObject(i)?.optString("text").orEmpty())
         }
-        node.optString("content").takeIf { it.isNotBlank() }?.let { return it }
-        node.optJSONObject("accessibility")?.optJSONObject("accessibilityData")
-            ?.optString("label").orEmpty()
+        if (text.isNotBlank()) return text.toString()
     }
-    is String -> node
-    else -> ""
+    val content = node.optString("content")
+    if (content.isNotBlank()) return content
+    return node.optJSONObject("accessibility")?.optJSONObject("accessibilityData")
+        ?.optString("label").orEmpty()
 }
 
 private fun findBrowseId(node: Any?): String? {
