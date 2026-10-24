@@ -53,6 +53,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -78,6 +79,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
 import app.unlitube.android.data.ChannelPage
 import app.unlitube.android.data.CommentItem
+import app.unlitube.android.data.SettingsStore
 import app.unlitube.android.data.VideoDetails
 import app.unlitube.android.data.VideoItem
 import app.unlitube.android.data.VideoPage
@@ -209,10 +211,7 @@ fun HomeScreen(initialVideoId: String? = null) {
                         title = "Library",
                         body = "Downloads, local playlists, history and Custom Feeds arrive in Phase 2. Your feed, search and playback are already live."
                     )
-                    else -> InfoScreen(
-                        title = "You",
-                        body = "You are in Guest Mode. Everything public works with no sign in, and nothing about your watching leaves this phone. Optional Signed In Mode arrives later in Phase 1."
-                    )
+                    else -> YouScreen()
                 }
             }
         }
@@ -271,7 +270,7 @@ private fun HomeFeed(
         }
         item {
             Text(
-                text = "UnliTube 0.4.0 - background play, mini player and PiP, Phase 1",
+                text = "UnliTube 0.5.0 - themes, Lite Mode and settings, Phase 1",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -1470,5 +1469,103 @@ private fun MiniPlayerBar(onOpen: () -> Unit, onClose: () -> Unit) {
             color = UnliViolet,
             trackColor = MaterialTheme.colorScheme.surfaceVariant
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun YouScreen() {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        item {
+            Text(text = "You", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(text = "Account", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Guest Mode is active. Everything public works with no sign in, " +
+                        "and nothing about your watching leaves this phone. Likes, " +
+                        "subscriptions and playlists are saved locally in the Library.",
+                    fontSize = 13.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "Appearance", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(
+                        listOf(
+                            "dark" to "Dark",
+                            "amoled" to "AMOLED black",
+                            "light" to "Light",
+                            "system" to "System"
+                        )
+                    ) { (value, label) ->
+                        FilterChip(
+                            selected = SettingsStore.themeMode == value,
+                            onClick = { SettingsStore.setThemeMode(value) },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "Playback", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Lite Mode", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = "Lighter home feed and capped default quality. Made for 3GB RAM phones and slow data.",
+                            fontSize = 12.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = SettingsStore.liteMode,
+                        onCheckedChange = { SettingsStore.setLiteMode(it) }
+                    )
+                }
+                Text(
+                    text = "Default quality",
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(
+                        listOf(
+                            0 to "Auto",
+                            360 to "360p",
+                            480 to "480p",
+                            720 to "720p",
+                            1080 to "1080p"
+                        )
+                    ) { (cap, label) ->
+                        FilterChip(
+                            selected = SettingsStore.qualityCap == cap,
+                            onClick = { SettingsStore.setQualityCap(cap) },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            Text(
+                text = "UnliTube 0.5.0 - Phase 1",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
