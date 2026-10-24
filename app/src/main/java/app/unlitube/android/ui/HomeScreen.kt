@@ -30,6 +30,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Pause
@@ -45,6 +46,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -80,6 +82,7 @@ import app.unlitube.android.data.VideoDetails
 import app.unlitube.android.data.VideoItem
 import app.unlitube.android.data.VideoPage
 import app.unlitube.android.data.YouTubeRepository
+import app.unlitube.android.player.PlayerHolder
 import app.unlitube.android.player.PlayerSurface
 import app.unlitube.android.player.UnliPlayer
 import app.unlitube.android.ui.theme.UnliCoral
@@ -102,13 +105,13 @@ private sealed interface FeedState {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen() {
+fun HomeScreen(initialVideoId: String? = null) {
     val repository = remember { YouTubeRepository() }
     var selectedTab by remember { mutableStateOf(0) }
     var selectedFolder by remember { mutableStateOf("All") }
     var feedState by remember { mutableStateOf<FeedState>(FeedState.Loading) }
     var feedNonce by remember { mutableStateOf(0) }
-    var openedVideoId by remember { mutableStateOf<String?>(null) }
+    var openedVideoId by remember { mutableStateOf<String?>(initialVideoId) }
     var openedChannel by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     LaunchedEffect(selectedFolder, feedNonce) {
@@ -125,8 +128,15 @@ fun HomeScreen() {
 
     Scaffold(
         bottomBar = {
-            if (openedVideoId == null && openedChannel == null) {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+            if (openedVideoId == null) {
+                Column {
+                    if (PlayerHolder.nowPlaying != null && !PlayerHolder.embedOnly) {
+                        MiniPlayerBar(
+                            onOpen = { openedVideoId = PlayerHolder.nowPlaying?.id },
+                            onClose = { PlayerHolder.stopAndClear() }
+                        )
+                    }
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     NavigationBarItem(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
@@ -151,6 +161,7 @@ fun HomeScreen() {
                         icon = { Icon(Icons.Filled.Person, contentDescription = "You") },
                         label = { Text("You") }
                     )
+                    }
                 }
             }
         }
@@ -260,7 +271,7 @@ private fun HomeFeed(
         }
         item {
             Text(
-                text = "UnliTube 0.3.0 - live feed, playback, channels and comments, Phase 1",
+                text = "UnliTube 0.4.0 - background play, mini player and PiP, Phase 1",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -644,7 +655,7 @@ private fun WatchContent(
     val video = details.video
     val channelId = video.channelId
     val listState = rememberLazyListState()
-    val player = remember(video.id) { UnliPlayer(context) }
+    val player = remember { PlayerHolder.get(context) }
 
     var chosenStreamIndex by remember(video.id) { mutableStateOf<Int?>(null) }
     var fallbackMode by remember(video.id) { mutableStateOf(false) }
@@ -693,10 +704,6 @@ private fun WatchContent(
     }
 
     DisposableEffect(player) {
-        onDispose { player.release() }
-    }
-
-    DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 playbackError = error.message ?: "Playback failed"
@@ -708,12 +715,19 @@ private fun WatchContent(
 
     LaunchedEffect(video.id) {
         listState.scrollToItem(0)
+        val alreadyLoaded = PlayerHolder.nowPlaying?.id == video.id && PlayerHolder.hasMedia()
+        PlayerHolder.nowPlaying = video
         if (details.streams.isEmpty()) {
             fallbackMode = true
+            PlayerHolder.embedOnly = true
         } else {
-            val index = details.defaultStreamIndex.coerceIn(0, details.streams.lastIndex)
-            chosenStreamIndex = index
-            player.play(details.streams[index])
+            PlayerHolder.embedOnly = false
+            if (!alreadyLoaded) {
+                val index = details.defaultStreamIndex.coerceIn(0, details.streams.lastIndex)
+                chosenStreamIndex = index
+                player.play(details.streams[index])
+            }
+            PlayerHolder.startService(context)
         }
     }
 
@@ -735,6 +749,21 @@ private fun WatchContent(
         playbackError = null
         player.play(option)
         if (resumeAt > 0) player.seekTo(resumeAt)
+    }
+
+    if (PlayerHolder.inPip) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            if (fallbackMode) {
+                EmbedFallback(videoId = video.id, modifier = Modifier.fillMaxSize())
+            } else {
+                PlayerSurface(player = player, modifier = Modifier.fillMaxSize())
+            }
+        }
+        return
     }
 
     LazyColumn(
@@ -901,7 +930,11 @@ private fun WatchContent(
                 playbackError?.let { message ->
                     Text(text = message, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
                     if (!fallbackMode) {
-                        Button(onClick = { fallbackMode = true }) {
+                        Button(onClick = {
+                            fallbackMode = true
+                            PlayerHolder.embedOnly = true
+                            player.setPlaying(false)
+                        }) {
                             Text("Use fallback player")
                         }
                     }
@@ -1357,5 +1390,85 @@ private fun ChannelScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MiniPlayerBar(onOpen: () -> Unit, onClose: () -> Unit) {
+    val video = PlayerHolder.nowPlaying ?: return
+    val context = LocalContext.current
+    var positionMs by remember(video.id) { mutableStateOf(0L) }
+    var durationMs by remember(video.id) { mutableStateOf(0L) }
+
+    LaunchedEffect(video.id) {
+        while (true) {
+            val exo = PlayerHolder.peek()?.exoPlayer
+            if (exo != null) {
+                positionMs = exo.currentPosition.coerceAtLeast(0L)
+                val duration = exo.duration
+                durationMs = if (duration > 0) duration else 0L
+            }
+            delay(600)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpen() }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AsyncImage(
+                model = video.thumbnailUrl,
+                contentDescription = video.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(width = 104.dp, height = 58.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            )
+            Spacer(modifier = Modifier.size(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = video.title,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = video.channel,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+            IconButton(onClick = { PlayerHolder.get(context).togglePlay() }) {
+                Icon(
+                    imageVector = if (PlayerHolder.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (PlayerHolder.isPlaying) "Pause" else "Play"
+                )
+            }
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, contentDescription = "Close player")
+            }
+        }
+        val fraction = if (durationMs > 0) {
+            (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        LinearProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier.fillMaxWidth(),
+            color = UnliViolet,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant
+        )
     }
 }
