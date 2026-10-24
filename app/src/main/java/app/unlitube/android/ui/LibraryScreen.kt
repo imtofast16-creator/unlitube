@@ -39,8 +39,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Intent
+import app.unlitube.android.data.ClipEntity
 import app.unlitube.android.data.DownloadEntity
 import app.unlitube.android.data.DownloadStore
+import app.unlitube.android.data.FocusNoteEntity
 import app.unlitube.android.data.HistoryEntity
 import app.unlitube.android.data.LibraryStore
 import app.unlitube.android.data.LikedEntity
@@ -72,6 +75,8 @@ fun LibraryScreen(
     var liked by remember { mutableStateOf<List<LikedEntity>>(emptyList()) }
     var watchLater by remember { mutableStateOf<List<WatchLaterEntity>>(emptyList()) }
     var downloads by remember { mutableStateOf<List<DownloadEntity>>(emptyList()) }
+    var focusNotes by remember { mutableStateOf<List<FocusNoteEntity>>(emptyList()) }
+    var clips by remember { mutableStateOf<List<ClipEntity>>(emptyList()) }
     var playlists by remember { mutableStateOf<List<PlaylistEntity>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     var subFeed by remember { mutableStateOf<List<VideoItem>?>(null) }
@@ -87,6 +92,8 @@ fun LibraryScreen(
             liked = LibraryStore.liked()
             watchLater = LibraryStore.watchLater()
             downloads = LibraryStore.downloads()
+            focusNotes = LibraryStore.allNotes()
+            clips = LibraryStore.allClips()
             playlists = LibraryStore.playlists()
             loaded = true
         }
@@ -312,6 +319,82 @@ fun LibraryScreen(
                         }
                     }
                 )
+            }
+        }
+
+        item { SectionTitle("Focus notes (${focusNotes.size})") }
+        if (focusNotes.isEmpty()) {
+            item {
+                Text(
+                    text = "Add a note on any watch page and it appears here.",
+                    fontSize = 13.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            items(focusNotes, key = { "note-${it.noteId}" }) { note ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = note.videoTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(
+                            text = "${formatLibraryTime(note.positionMs)} - ${note.text}",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = { onOpenVideo(note.videoId) }) { Text("Open") }
+                    TextButton(onClick = {
+                        scope.launch {
+                            LibraryStore.deleteNote(note.noteId)
+                            reload()
+                        }
+                    }) { Text("Delete") }
+                }
+            }
+        }
+
+        item { SectionTitle("ClipForge clips (${clips.size})") }
+        if (clips.isEmpty()) {
+            item {
+                Text(
+                    text = "Mark a start and end on any watch page, save the clip, and share its timestamp link.",
+                    fontSize = 13.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            items(clips, key = { "clip-${it.clipId}" }) { clip ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = clip.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                        Text(
+                            text = "${formatLibraryTime(clip.startMs)} - ${formatLibraryTime(clip.endMs)}",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = {
+                        LibraryStore.pendingClipVideoId = clip.videoId
+                        LibraryStore.pendingClipStartMs = clip.startMs
+                        onOpenVideo(clip.videoId)
+                    }) { Text("Play") }
+                    TextButton(onClick = {
+                        val share = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(
+                                Intent.EXTRA_TEXT,
+                                "https://www.youtube.com/watch?v=${clip.videoId}&t=${clip.startMs / 1000}s"
+                            )
+                        }
+                        context.startActivity(Intent.createChooser(share, "Share clip"))
+                    }) { Text("Share") }
+                    TextButton(onClick = {
+                        scope.launch {
+                            LibraryStore.deleteClip(clip.clipId)
+                            reload()
+                        }
+                    }) { Text("Delete") }
+                }
             }
         }
 
