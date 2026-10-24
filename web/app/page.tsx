@@ -2,12 +2,12 @@ const features = [
   {
     tag: "Only on UnliTube",
     title: "Triple Engine playback",
-    body: "Three ways to fetch every video. If one breaks, the next takes over silently. Pure Tuber has one engine, when it dies, the app dies.",
+    body: "On-device playback first, with the official embed player as fallback when a video has no direct stream. No video ever passes through UnliTube servers.",
   },
   {
     tag: "Custom player",
     title: "Ultra quality, zero jank",
-    body: "Up to 4K and 8K adaptive, HDR, next video prefetch, seek previews, per side double tap, speed scrub, chapters rail and stats overlay.",
+    body: "Up to 4K and 8K adaptive, HDR, per side double tap to seek, speed control, quality picker, and a clean custom control bar.",
   },
   {
     tag: "Only on UnliTube",
@@ -17,27 +17,27 @@ const features = [
   {
     tag: "Only on UnliTube",
     title: "Focus Mode",
-    body: "Timestamped notes on study videos with auto chapters from captions. Tap a note, jump to that exact second.",
+    body: "Timestamped notes on any video. Tap a note, jump to that exact second, and share your notes as text.",
   },
   {
     tag: "Only on UnliTube",
     title: "ClipForge",
-    body: "Trim any part of a video and share just that clip. No full download, no editor app needed.",
+    body: "Mark a start and end on any video, save the clip, and share a link that opens at that exact moment.",
   },
   {
     tag: "Full YouTube",
     title: "Subs, likes, comments, Live, Shorts",
-    body: "The whole YouTube surface. Guest mode for zero risk, optional sign in for real likes, subscriptions and comment posting.",
+    body: "Home, search, channel pages, comments, playlists, history and Shorts folders, all in guest mode with everything stored on your phone.",
   },
   {
     tag: "Performance",
     title: "Built for low end phones",
-    body: "Auto Lite Mode on 3GB RAM phones, APK under 28MB, cold start under 1.2 seconds, 60fps scrolling as a release gate.",
+    body: "Auto Lite Mode on 3GB RAM phones, APK around 21MB, and a quiet charcoal UI that keeps thumbnails front and center.",
   },
   {
     tag: "Standard",
     title: "Background, PiP, downloads",
-    body: "Background audio, floating player, video and audio downloads with pause and resume, SponsorBlock, AMOLED black theme.",
+    body: "Background audio, floating mini player, picture in picture, video downloads with offline playback, SponsorBlock, AMOLED black theme.",
   },
 ];
 
