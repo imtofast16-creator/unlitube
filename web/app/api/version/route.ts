@@ -6,11 +6,11 @@ import { NextResponse } from "next/server";
 export async function GET() {
   return NextResponse.json({
     app: "UnliTube",
-    versionName: "0.3.0",
-    versionCode: 3,
+    versionName: "1.0.0",
+    versionCode: 11,
     apkUrl: "",
     sha256: "",
-    notes: "Phase 1 slice 2: channel pages with video lists, plus real comments with replies and load-more on the watch page. Signed release APK arrives once the signing keystore is set up.",
+    notes: "1.0.0 first complete build: live feed, search, watch with custom player, channel pages, comments, mini player, background play, PiP, local library, downloads with offline playback, SponsorBlock, update checker, Distraction Shield, Focus notes and ClipForge, plus the premium UI redesign. Debug APK only for now, the signed public release still needs the signing keystore.",
     mandatory: false,
   });
 }
