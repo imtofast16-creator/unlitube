@@ -65,6 +65,27 @@ data class PlaylistEntity(
     val createdAt: Long
 )
 
+@Entity(tableName = "focus_notes")
+data class FocusNoteEntity(
+    @PrimaryKey val noteId: String,
+    val videoId: String,
+    val videoTitle: String,
+    val positionMs: Long,
+    val text: String,
+    val createdAt: Long
+)
+
+@Entity(tableName = "clips")
+data class ClipEntity(
+    @PrimaryKey val clipId: String,
+    val videoId: String,
+    val videoTitle: String,
+    val startMs: Long,
+    val endMs: Long,
+    val title: String,
+    val createdAt: Long
+)
+
 @Entity(tableName = "downloads")
 data class DownloadEntity(
     @PrimaryKey val videoId: String,
@@ -176,6 +197,30 @@ interface LibraryDao {
 
     @Query("DELETE FROM downloads WHERE videoId = :videoId")
     suspend fun deleteDownload(videoId: String)
+
+    @Query("SELECT * FROM focus_notes WHERE videoId = :videoId ORDER BY positionMs ASC")
+    suspend fun notesForVideo(videoId: String): List<FocusNoteEntity>
+
+    @Query("SELECT * FROM focus_notes ORDER BY createdAt DESC")
+    suspend fun allNotes(): List<FocusNoteEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertNote(item: FocusNoteEntity)
+
+    @Query("DELETE FROM focus_notes WHERE noteId = :noteId")
+    suspend fun deleteNote(noteId: String)
+
+    @Query("SELECT * FROM clips WHERE videoId = :videoId ORDER BY startMs ASC")
+    suspend fun clipsForVideo(videoId: String): List<ClipEntity>
+
+    @Query("SELECT * FROM clips ORDER BY createdAt DESC")
+    suspend fun allClips(): List<ClipEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertClip(item: ClipEntity)
+
+    @Query("DELETE FROM clips WHERE clipId = :clipId")
+    suspend fun deleteClip(clipId: String)
 }
 
 @Database(
@@ -186,9 +231,11 @@ interface LibraryDao {
         WatchLaterEntity::class,
         PlaylistEntity::class,
         PlaylistItemEntity::class,
-        DownloadEntity::class
+        DownloadEntity::class,
+        FocusNoteEntity::class,
+        ClipEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class UnliTubeDatabase : RoomDatabase() {
@@ -328,5 +375,43 @@ object LibraryStore {
 
     suspend fun deleteDownload(videoId: String) {
         dao.deleteDownload(videoId)
+    }
+
+    /** One-time seek target set when the user plays a saved clip. */
+    var pendingClipVideoId: String? = null
+    var pendingClipStartMs: Long = 0L
+
+    suspend fun notesForVideo(videoId: String): List<FocusNoteEntity> =
+        dao.notesForVideo(videoId)
+
+    suspend fun allNotes(): List<FocusNoteEntity> = dao.allNotes()
+
+    suspend fun addNote(video: VideoItem, positionMs: Long, text: String): String {
+        val id = "note_${System.currentTimeMillis()}"
+        dao.insertNote(
+            FocusNoteEntity(id, video.id, video.title, positionMs, text, System.currentTimeMillis())
+        )
+        return id
+    }
+
+    suspend fun deleteNote(noteId: String) {
+        dao.deleteNote(noteId)
+    }
+
+    suspend fun clipsForVideo(videoId: String): List<ClipEntity> =
+        dao.clipsForVideo(videoId)
+
+    suspend fun allClips(): List<ClipEntity> = dao.allClips()
+
+    suspend fun addClip(video: VideoItem, startMs: Long, endMs: Long, title: String): String {
+        val id = "clip_${System.currentTimeMillis()}"
+        dao.insertClip(
+            ClipEntity(id, video.id, video.title, startMs, endMs, title, System.currentTimeMillis())
+        )
+        return id
+    }
+
+    suspend fun deleteClip(clipId: String) {
+        dao.deleteClip(clipId)
     }
 }
