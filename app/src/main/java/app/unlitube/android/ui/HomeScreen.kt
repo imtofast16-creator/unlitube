@@ -483,7 +483,7 @@ private fun HomeFeed(
         }
         item {
             Text(
-                text = "UnliTube 0.10.0 - Focus notes and ClipForge, slice 8",
+                text = "UnliTube 1.0.0 - first complete build",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -2428,7 +2428,7 @@ private fun YouScreen() {
         }
         item {
             Text(
-                text = "UnliTube 0.10.0 - slice 8",
+                text = "UnliTube 1.0.0",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
