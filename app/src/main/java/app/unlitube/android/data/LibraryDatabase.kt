@@ -65,6 +65,20 @@ data class PlaylistEntity(
     val createdAt: Long
 )
 
+@Entity(tableName = "downloads")
+data class DownloadEntity(
+    @PrimaryKey val videoId: String,
+    val title: String,
+    val channel: String,
+    val channelId: String?,
+    val thumbnailUrl: String,
+    val videoPath: String?,
+    val audioPath: String?,
+    val status: String,
+    val progress: Int,
+    val updatedAt: Long
+)
+
 @Entity(tableName = "playlist_items")
 data class PlaylistItemEntity(
     @PrimaryKey(autoGenerate = true) val itemId: Int = 0,
@@ -150,6 +164,18 @@ interface LibraryDao {
 
     @Query("DELETE FROM playlist_items WHERE playlistId = :playlistId AND videoId = :videoId")
     suspend fun deletePlaylistItem(playlistId: String, videoId: String)
+
+    @Query("SELECT * FROM downloads ORDER BY updatedAt DESC")
+    suspend fun downloads(): List<DownloadEntity>
+
+    @Query("SELECT * FROM downloads WHERE videoId = :videoId")
+    suspend fun download(videoId: String): DownloadEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertDownload(item: DownloadEntity)
+
+    @Query("DELETE FROM downloads WHERE videoId = :videoId")
+    suspend fun deleteDownload(videoId: String)
 }
 
 @Database(
@@ -159,9 +185,10 @@ interface LibraryDao {
         LikedEntity::class,
         WatchLaterEntity::class,
         PlaylistEntity::class,
-        PlaylistItemEntity::class
+        PlaylistItemEntity::class,
+        DownloadEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class UnliTubeDatabase : RoomDatabase() {
@@ -289,5 +316,17 @@ object LibraryStore {
 
     suspend fun removeFromPlaylist(playlistId: String, videoId: String) {
         dao.deletePlaylistItem(playlistId, videoId)
+    }
+
+    suspend fun downloads(): List<DownloadEntity> = dao.downloads()
+
+    suspend fun download(videoId: String): DownloadEntity? = dao.download(videoId)
+
+    suspend fun upsertDownload(item: DownloadEntity) {
+        dao.insertDownload(item)
+    }
+
+    suspend fun deleteDownload(videoId: String) {
+        dao.deleteDownload(videoId)
     }
 }
