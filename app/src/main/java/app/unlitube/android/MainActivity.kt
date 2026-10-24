@@ -11,7 +11,9 @@ import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.ContextCompat
+import app.unlitube.android.data.SettingsStore
 import app.unlitube.android.player.PlayerHolder
 import app.unlitube.android.ui.HomeScreen
 import app.unlitube.android.ui.theme.UnliTubeTheme
@@ -21,10 +23,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        SettingsStore.init(this)
         requestNotificationPermissionIfNeeded()
         val initialVideoId = extractVideoId(intent)
         setContent {
-            UnliTubeTheme {
+            val mode = SettingsStore.themeMode
+            val systemDark = isSystemInDarkTheme()
+            val dark = when (mode) {
+                "light" -> false
+                "dark", "amoled" -> true
+                else -> systemDark
+            }
+            UnliTubeTheme(darkTheme = dark, amoled = mode == "amoled") {
                 HomeScreen(initialVideoId = initialVideoId)
             }
         }
