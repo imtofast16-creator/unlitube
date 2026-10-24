@@ -6,11 +6,11 @@ import { NextResponse } from "next/server";
 export async function GET() {
   return NextResponse.json({
     app: "UnliTube",
-    versionName: "0.1.0",
-    versionCode: 1,
+    versionName: "0.2.0",
+    versionCode: 2,
     apkUrl: "",
     sha256: "",
-    notes: "Phase 0 scaffold build. Live feed arrives in Phase 1.",
+    notes: "Phase 1: live home feed, real search with pagination, watch page with adaptive quality playback, speed control, and Up next. Signed release APK arrives once the signing keystore is set up.",
     mandatory: false,
   });
 }
